@@ -1,0 +1,54 @@
+# Configuration using HuggingFace LLM provider
+
+# MCP Servers Configuration
+mcp_servers:
+  - id: "mock_basic"
+    name: "Mock Basic Tools Server"
+    transport: "stdio"
+    command: ["python", "-m", "mcp_rl_agent.mcp.mock_server", "stdio"]
+  - id: "mock_files"
+    name: "Mock File Tools Server"
+    transport: "stdio"
+    command: ["python", "-c", "from mcp_rl_agent.mcp.mock_client import MockMCPClientFactory; import asyncio; server = MockMCPClientFactory.create_file_tools_client(); print('Mock file server ready')"]
+
+# LLM Configuration - HuggingFace
+llm:
+  provider: "huggingface"
+  model_name: "microsoft/DialoGPT-medium"  # Or any other conversational model
+  max_tokens: 512
+  temperature: 0.8
+  use_local: true
+  device: "auto"  # Will use GPU if available
+  dtype: "auto"
+  cache_dir: "./models"
+
+# RL Configuration
+rl:
+  learning_rate: 0.0005
+  gamma: 0.99
+  gae_lambda: 0.95
+  clip_range: 0.2
+  n_steps: 512
+  batch_size: 128
+  n_epochs: 6
+  hidden_size: 384
+  n_layers: 2
+  ent_coef: 0.02
+  vf_coef: 0.5
+
+# Environment Configuration
+environment:
+  max_episode_length: 80
+  context_window: 12
+  embedding_dim: 768
+
+# Console Operator Interface
+operator:
+  type: "console"
+  prompt: "You: "
+  timeout: 60.0
+
+# Logging
+logging:
+  level: "DEBUG"
+  structured: true

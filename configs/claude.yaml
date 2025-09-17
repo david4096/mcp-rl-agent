@@ -1,0 +1,49 @@
+# Configuration using Claude LLM provider
+
+# MCP Servers Configuration
+mcp_servers:
+  - id: "mock_basic"
+    name: "Mock Basic Tools Server"
+    transport: "stdio"
+    command: ["python", "-m", "mcp_rl_agent.mcp.mock_server", "stdio"]
+
+# LLM Configuration - Claude
+llm:
+  provider: "claude"
+  model_name: "claude-3-5-sonnet-20241022"
+  api_key: "${ANTHROPIC_API_KEY}"  # Set this environment variable
+  max_tokens: 1024
+  temperature: 0.7
+  top_p: 0.95
+  system_prompt: "You are an AI assistant that helps users by selecting and executing appropriate tools from the available MCP servers. Be concise and helpful in your responses."
+
+# RL Configuration - Adjusted for Claude
+rl:
+  learning_rate: 0.0001  # Lower learning rate for stability
+  gamma: 0.95
+  gae_lambda: 0.9
+  clip_range: 0.15
+  n_steps: 256
+  batch_size: 64
+  n_epochs: 8
+  hidden_size: 512
+  n_layers: 3
+  ent_coef: 0.005
+  vf_coef: 0.5
+
+# Environment Configuration
+environment:
+  max_episode_length: 100
+  context_window: 15
+  embedding_dim: 768  # Larger embedding for more sophisticated interactions
+
+# Console Operator Interface
+operator:
+  type: "console"
+  prompt: "Human: "
+  timeout: 120.0
+
+# Logging
+logging:
+  level: "INFO"
+  structured: true
