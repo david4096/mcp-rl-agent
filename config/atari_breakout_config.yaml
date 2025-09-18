@@ -1,0 +1,101 @@
+# Configuration for MCP RL Agent with Atari Breakout environment
+agent_id: "mcp-rl-breakout"
+version: "1.0"
+
+# MCP Server configurations
+mcp_servers:
+  - id: "atari_breakout"
+    name: "Atari Breakout Environment"
+    description: "MCP server hosting Atari Breakout learning environment"
+    command: "python"
+    args: ["-m", "mcp_atari_server", "--game", "breakout"]
+    env:
+      ATARI_GAME: "breakout"
+      RENDER_MODE: "rgb_array"
+
+# LLM Provider configuration
+llm_provider:
+  type: "mock"  # Use mock for training, or "claude"/"huggingface" for real usage
+  config:
+    model: "mock-embedder"
+
+# Enhanced PPO configuration with separated embeddings
+rl:
+  type: "enhanced_ppo"
+  learning_rate: 0.0003
+  gamma: 0.99
+  clip_range: 0.2
+  batch_size: 64
+  n_epochs: 10
+  value_coef: 0.5
+  entropy_coef: 0.01
+  max_grad_norm: 0.5
+
+  # Enhanced architecture parameters
+  query_embedding_dim: 256
+  action_embedding_dim: 128
+  max_action_history: 10
+  hidden_size: 256
+  n_layers: 2
+  attention_heads: 4
+
+# Environment configuration
+environment:
+  max_episode_length: 1000
+  reward_scale: 1.0
+  context_window: 10
+  embedding_dim: 1536  # Total: 256 (query) + 1280 (10 * 128 action history)
+  max_action_history: 10
+
+  # Standard reward parameters
+  success_reward: 1.0
+  failure_penalty: -0.1
+  step_penalty: -0.001
+  repetition_penalty: -0.1
+
+  # Atari-specific reward configuration
+  atari_rewards:
+    # Universal reward settings
+    universal:
+      score_reward_scale: 0.01     # Reward per point scored
+      life_penalty: -1.0           # Penalty for losing a life
+      level_completion_bonus: 10.0 # Bonus for completing a level
+      efficiency_bonus_scale: 0.5  # Bonus for efficient actions
+      exploration_bonus: 0.1       # Bonus for new areas/actions
+
+    # Breakout-specific rewards
+    game_specific:
+      breakout:
+        brick_destroyed_reward: 0.1    # Extra reward per brick destroyed
+        paddle_hit_bonus: 0.05         # Bonus for successful paddle hits
+        ball_lost_penalty: -2.0        # Additional penalty for losing ball
+        wall_clear_bonus: 20.0         # Huge bonus for clearing all bricks
+
+    # Adaptive learning parameters
+    adaptive:
+      enabled: true
+      learning_rate: 0.001
+      adaptation_window: 100  # Episodes to consider for adaptation
+      min_episodes: 50       # Minimum episodes before adaptation starts
+
+# Operator interface (for feedback and interaction)
+operator:
+  type: "mock"  # Use mock for training
+  feedback_probability: 0.1  # Probability of providing feedback
+
+# Training configuration
+training:
+  total_episodes: 5000
+  save_interval: 100
+  eval_interval: 50
+  checkpoint_dir: "./checkpoints/breakout"
+  log_level: "INFO"
+
+# Logging configuration
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  handlers:
+    - type: "file"
+      filename: "logs/mcp_rl_breakout.log"
+    - type: "console"

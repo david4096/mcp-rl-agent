@@ -1,7 +1,7 @@
 """Core abstract interfaces for the MCP RL Agent system."""
 
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional, AsyncIterator, Union
+from typing import Any, Dict, List, Optional, AsyncIterator, Union, Tuple
 from dataclasses import dataclass
 from enum import Enum
 import numpy as np
@@ -34,6 +34,16 @@ class MCPResult:
     metadata: Optional[Dict[str, Any]] = None
 
 
+@dataclass
+class ActionHistoryItem:
+    """Single item in the action history chain."""
+    tool_name: str
+    arguments: Dict[str, Any]
+    success: bool
+    step: int
+    embedding: Optional[np.ndarray] = None
+
+
 class MessageType(Enum):
     """Types of messages in the conversation."""
     HUMAN = "human"
@@ -61,11 +71,28 @@ class Conversation:
 
 @dataclass
 class AgentState:
-    """State representation for the RL agent."""
+    """Enhanced state representation for the RL agent with separate components."""
     conversation: Conversation
     available_actions: List[MCPTool]
+
+    # Current user query (most recent human message)
+    current_query: Optional[str] = None
+    current_query_embedding: Optional[np.ndarray] = None
+
+    # Action history chain
+    action_history: List[ActionHistoryItem] = None
+    action_history_embeddings: Optional[np.ndarray] = None  # Matrix of action embeddings
+
+    # Context embedding (for backward compatibility)
     context_embedding: Optional[np.ndarray] = None
+
+    # Step info
     step: int = 0
+
+    def __post_init__(self):
+        """Initialize empty lists if None."""
+        if self.action_history is None:
+            self.action_history = []
 
 
 @dataclass

@@ -1,0 +1,48 @@
+# Configuration for MCP RL Agent with MCP Gym Atari - Interactive Mode
+# MCP Server configuration - HTTP transport to your running server
+mcp_servers:
+  - id: "mcp_gym_atari"
+    name: "MCP Gym - Atari Learning Environment"
+    transport: "http"
+    url: "http://0.0.0.0:8000/mcp"
+    timeout: 60
+    retry_attempts: 3
+    retry_delay: 2.0
+
+# LLM configuration
+llm:
+  provider: "mock"
+  model_name: "mock-embedder"
+
+# PPO configuration
+rl:
+  learning_rate: 0.0003
+  gamma: 0.99
+  n_steps: 128
+  batch_size: 32
+  n_epochs: 4
+  clip_range: 0.2
+  clip_range_vf: 0.2
+  vf_coef: 0.5
+  ent_coef: 0.01
+  max_grad_norm: 0.5
+  target_kl: 0.01
+  gae_lambda: 0.95
+  hidden_size: 256
+  use_sde: false
+
+# Environment configuration
+environment:
+  max_steps: 1000
+  reward_scale: 1.0
+  step_penalty: -0.001
+
+# Operator interface - CONSOLE for real user interaction
+operator:
+  type: "console"
+  prompt: "Human: "
+  timeout: 30.0
+
+# Logging configuration
+logging:
+  level: "INFO"

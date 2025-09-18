@@ -1,0 +1,103 @@
+# Configuration for MCP RL Agent with Atari Pac-Man environment
+agent_id: "mcp-rl-pacman"
+version: "1.0"
+
+# MCP Server configurations
+mcp_servers:
+  - id: "atari_pacman"
+    name: "Atari Pac-Man Environment"
+    description: "MCP server hosting Atari Ms. Pac-Man learning environment"
+    command: "python"
+    args: ["-m", "mcp_atari_server", "--game", "ms_pacman"]
+    env:
+      ATARI_GAME: "ms_pacman"
+      RENDER_MODE: "rgb_array"
+
+# LLM Provider configuration
+llm_provider:
+  type: "mock"
+  config:
+    model: "mock-embedder"
+
+# Enhanced PPO configuration
+rl:
+  type: "enhanced_ppo"
+  learning_rate: 0.0002  # Slightly lower for complex game
+  gamma: 0.99
+  clip_range: 0.2
+  batch_size: 128        # Larger batch for complex environment
+  n_epochs: 10
+  value_coef: 0.5
+  entropy_coef: 0.02     # Higher entropy for exploration
+  max_grad_norm: 0.5
+
+  # Enhanced architecture parameters
+  query_embedding_dim: 256
+  action_embedding_dim: 128
+  max_action_history: 15  # Longer history for strategic game
+  hidden_size: 512        # Larger network for complexity
+  n_layers: 3
+  attention_heads: 8
+
+# Environment configuration
+environment:
+  max_episode_length: 3000
+  reward_scale: 1.0
+  context_window: 15
+  embedding_dim: 2176     # 256 + (15 * 128)
+  max_action_history: 15
+
+  # Standard reward parameters
+  success_reward: 1.0
+  failure_penalty: -0.1
+  step_penalty: -0.0003   # Very small step penalty
+  repetition_penalty: -0.2 # Higher penalty to avoid getting stuck
+
+  # Atari-specific reward configuration
+  atari_rewards:
+    # Universal reward settings
+    universal:
+      score_reward_scale: 0.001        # Lower scale due to high Pac-Man scores
+      life_penalty: -5.0               # High penalty for losing life
+      level_completion_bonus: 50.0     # Big bonus for completing level
+      efficiency_bonus_scale: 1.0
+      exploration_bonus: 0.2           # High exploration reward
+
+    # Pac-Man specific rewards
+    game_specific:
+      pacman:
+        dot_eaten_reward: 0.1          # Reward for eating dots
+        power_pellet_bonus: 2.0        # Bonus for power pellets
+        ghost_eaten_reward: 5.0        # Big reward for eating ghosts
+        fruit_bonus: 10.0              # Bonus for eating fruit
+        ghost_avoidance_bonus: 0.1     # Bonus for avoiding ghosts when vulnerable
+        strategic_movement_bonus: 0.05  # Bonus for moving toward objectives
+
+    # Adaptive learning parameters
+    adaptive:
+      enabled: true
+      learning_rate: 0.0005   # Faster adaptation for complex game
+      adaptation_window: 150
+      min_episodes: 75
+
+# Operator interface
+operator:
+  type: "mock"
+  feedback_probability: 0.15  # More feedback for complex game
+
+# Training configuration
+training:
+  total_episodes: 10000    # More episodes for complex game
+  save_interval: 200
+  eval_interval: 100
+  checkpoint_dir: "./checkpoints/pacman"
+  log_level: "INFO"
+
+# Logging configuration
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  handlers:
+    - type: "file"
+      filename: "logs/mcp_rl_pacman.log"
+    - type: "console"

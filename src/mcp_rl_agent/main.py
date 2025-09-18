@@ -77,33 +77,62 @@ class MCPRLAgentSystem:
         self.mcp_client_manager = MCPClientManager()
 
         # Connect to MCP servers
+        print(f"\n🔗 Connecting to {len(self.config.mcp_servers)} MCP server(s)...")
+
         for server_config in self.config.mcp_servers:
+            print(f"\n📡 Connecting to: {server_config.name}")
+            print(f"   Transport: {server_config.transport}")
+            print(f"   URL: {getattr(server_config, 'url', 'N/A')}")
+
             try:
                 await self.mcp_client_manager.add_server(server_config)
-                logger.info("Connected to MCP server", server_id=server_config.id)
+
+                # Get discovered tools and display them
+                tools = []
+                if server_config.id in self.mcp_client_manager._tools_cache:
+                    tools = self.mcp_client_manager._tools_cache[server_config.id]
+
+                print(f"✅ Connected to {server_config.name}")
+                print(f"🔧 Discovered {len(tools)} tools:")
+
+                for i, tool in enumerate(tools):
+                    description = tool.description[:80] + "..." if len(tool.description) > 80 else tool.description
+                    print(f"   [{i}] {tool.name}: {description}")
+
+                logger.info("Connected to MCP server", server_id=server_config.id, tool_count=len(tools))
+
             except Exception as e:
+                print(f"❌ Failed to connect to {server_config.name}: {e}")
                 logger.error("Failed to connect to MCP server", server_id=server_config.id, error=str(e))
+
                 # For mock servers, create mock client instead
                 if "mock" in server_config.id:
+                    print(f"🔄 Using mock client for {server_config.id}")
                     from .mcp.mock_client import MockMCPClient
                     mock_client = MockMCPClient(server_config.id)
                     await mock_client.connect({})
                     tools = await mock_client.discover_tools()
+                    print(f"🔧 Mock tools: {[tool.name for tool in tools]}")
                     # Add to client manager (simplified for demo)
                     logger.info("Using mock client", server_id=server_config.id, tool_count=len(tools))
 
         # Initialize LLM provider
-        llm_config = self.config.llm.dict()
+        print(f"🤖 Loading LLM Provider: {self.config.llm.provider}")
+        print(f"📝 Model: {self.config.llm.model_name}")
+
+        llm_config = self.config.llm.model_dump()
         self.llm_provider = LLMProviderFactory.create_provider(llm_config)
-        logger.info("Initialized LLM provider", provider=self.llm_provider.model_name)
+
+        print(f"✅ LLM Provider initialized successfully")
+        logger.info("Initialized LLM provider", provider=self.config.llm.provider, model=self.config.llm.model_name)
 
         # Initialize operator interface
-        operator_config = self.config.operator.dict()
+        operator_config = self.config.operator.model_dump()
         self.operator_interface = OperatorInterfaceFactory.create_interface(operator_config)
         logger.info("Initialized operator interface", type=self.config.operator.type)
 
         # Initialize environment
-        env_config = self.config.environment.dict()
+        env_config = self.config.environment.model_dump()
         self.environment = MCPRLEnvironment(
             mcp_client_manager=self.mcp_client_manager,
             llm_provider=self.llm_provider,
@@ -113,7 +142,7 @@ class MCPRLAgentSystem:
         logger.info("Initialized RL environment")
 
         # Initialize PPO agent
-        rl_config = self.config.rl.dict()
+        rl_config = self.config.rl.model_dump()
         rl_config.update({
             "state_dim": env_config.get("embedding_dim", 512),
             "max_actions": 50  # Will be updated based on available tools
@@ -211,24 +240,180 @@ class MCPRLAgentSystem:
 
         try:
             while self.running:
-                # Reset environment for new conversation
-                obs = await self.environment.reset()
+                try:
+                    # Reset environment for new query-response cycle
+                    print("\n" + "="*60)
+                    print("🆕 Ready for your next query...")
+                    print("="*60)
 
-                print("Starting new conversation...")
+                    obs = await self.environment.reset()
 
-                while not obs.done and self.running:
-                    # Agent selects action
-                    action = self.agent.select_action(obs.state)
+                    print(f"🔄 Environment reset complete")
+                    if hasattr(obs.state, 'available_actions') and obs.state.available_actions:
+                        print(f"🛠️  {len(obs.state.available_actions)} tools available:")
+                        for i, action in enumerate(obs.state.available_actions[:5]):
+                            print(f"   [{i}] {action.name}")
+                        if len(obs.state.available_actions) > 5:
+                            print(f"   ... and {len(obs.state.available_actions) - 5} more")
 
-                    # Take step in environment
-                    obs = await self.environment.step(action)
+                    # PHASE 1: Get human query
+                    print(f"\n💭 Please enter your request (or 'quit' to exit):")
 
-                    # Check for user quit command
+                    # Wait for human to enter their query
+                    user_query = await self.operator_interface.receive_message()
+                    if not user_query or user_query.lower() in ["quit", "exit"]:
+                        print("👋 Goodbye!")
+                        self.running = False
+                        break
+
+                    print(f"\n👤 Human Query: '{user_query}'")
+                    print(f"🤖 Agent will now work to fulfill this request...\n")
+
+                    # Add the human query to conversation
+                    from .interfaces import MessageType
+                    self.environment.conversation_manager.add_message(
+                        self.environment.current_conversation_id,
+                        MessageType.HUMAN,
+                        user_query
+                    )
+
+                    # PHASE 2: Agent executes a series of actions to fulfill the query
+                    episode_steps = 0
+                    max_episode_steps = 20  # Reasonable limit for a single query
+                    episode_reward = 0
+                    action_chain = []
+
+                    # For RL learning - collect experience
+                    states = []
+                    actions = []
+                    rewards = []
+                    next_states = []
+                    dones = []
+
+                    query_fulfilled = False
+                    while not query_fulfilled and self.running and episode_steps < max_episode_steps:
+                        print(f"--- Action {episode_steps + 1} ---")
+
+                        # Store current state for RL learning
+                        states.append(obs.state)
+
+                        # Agent selects action (with anti-overfitting bias)
+                        action = self._select_action_with_diversity_bias(obs.state, action_chain, user_query)
+
+                        # Store action for RL learning
+                        actions.append(action)
+
+                        # Show what action was selected
+                        if hasattr(obs.state, 'available_actions') and obs.state.available_actions and action < len(obs.state.available_actions):
+                            selected_tool = obs.state.available_actions[action]
+                            print(f"🤖 Executing: {selected_tool.name}")
+                            action_chain.append(selected_tool.name)
+                        else:
+                            print(f"🤖 Action {action} (out of bounds)")
+                            action_chain.append(f"invalid_action_{action}")
+
+                        # Take step in environment
+                        next_obs = await self.environment.step(action)
+                        episode_steps += 1
+                        step_reward = next_obs.reward
+                        episode_reward += step_reward
+
+                        # Store experience for RL learning
+                        rewards.append(step_reward)
+                        next_states.append(next_obs.state)
+                        dones.append(next_obs.done)
+
+                        # Check if query seems fulfilled (basic heuristics)
+                        query_fulfilled = self._is_query_fulfilled(next_obs, episode_steps, user_query)
+
+                        # Show progress
+                        if next_obs.info:
+                            success_indicator = "✅" if next_obs.info.get("success", False) else "❌"
+                            print(f"   {success_indicator} Result: {next_obs.info.get('action', 'unknown')}")
+
+                        # Update obs for next iteration
+                        obs = next_obs
+
+                        # Small pause between actions
+                        await asyncio.sleep(0.2)
+
+                    # PHASE 3: Show results and get feedback
+                    print(f"\n🏁 Query execution completed!")
+                    print(f"📊 Summary:")
+                    print(f"   • Actions taken: {episode_steps}")
+                    print(f"   • Action chain: {' → '.join(action_chain)}")
+                    print(f"   • Total reward: {episode_reward:.3f}")
+
+                    # Show final conversation state
                     if obs.state.conversation and obs.state.conversation.messages:
-                        last_msg = obs.state.conversation.messages[-1]
-                        if last_msg.type.value == "human" and last_msg.content.lower() in ["quit", "exit"]:
-                            self.running = False
-                            break
+                        print(f"💬 Final conversation:")
+                        recent_messages = obs.state.conversation.messages[-3:]
+                        for msg in recent_messages:
+                            prefix = "👤" if msg.type.value == "human" else "🤖" if msg.type.value == "agent" else "⚙️"
+                            content = msg.content[:100] + "..." if len(msg.content) > 100 else msg.content
+                            print(f"   {prefix} {msg.type.value}: {content}")
+
+                    # PHASE 4: Get human feedback on the overall performance
+                    print(f"\n📋 How well did the agent fulfill your request?")
+                    print("   Enter a score from -1 (terrible) to +1 (excellent), or 'good'/'bad':")
+
+                    feedback_response = await self.operator_interface.receive_message()
+                    if feedback_response:
+                        try:
+                            if feedback_response.lower() in ['good', 'great', 'excellent', 'perfect']:
+                                human_feedback = 1.0
+                            elif feedback_response.lower() in ['bad', 'terrible', 'awful', 'wrong']:
+                                human_feedback = -1.0
+                            elif feedback_response.lower() in ['ok', 'okay', 'fine']:
+                                human_feedback = 0.5
+                            else:
+                                human_feedback = max(-1.0, min(1.0, float(feedback_response)))
+
+                            print(f"👤 Human feedback: {human_feedback:.1f}")
+
+                            # Apply human feedback to the episode reward
+                            final_episode_reward = episode_reward + (human_feedback * 2.0)  # Scale human feedback
+                            print(f"🎯 Final episode reward: {final_episode_reward:.3f}")
+
+                        except ValueError:
+                            print("⚠️  Invalid feedback format, using neutral (0.0)")
+                            human_feedback = 0.0
+                            final_episode_reward = episode_reward
+                    else:
+                        print("⚠️  No feedback received, using automatic reward only")
+                        final_episode_reward = episode_reward
+
+                    # PHASE 5: Update RL agent with the complete episode experience
+                    if states and len(states) == len(actions) == len(rewards) == len(next_states) == len(dones):
+                        print(f"🧠 Training agent on {len(states)} action steps...")
+
+                        # Apply final human feedback to last reward
+                        if 'human_feedback' in locals() and rewards:
+                            rewards[-1] += human_feedback * 1.0  # Boost last reward with human feedback
+
+                        # Update the agent with the complete episode
+                        metrics = self.agent.update(states, actions, rewards, next_states, dones)
+
+                        print(f"📈 Training metrics: {metrics}")
+                        logger.info("RL agent updated", metrics=metrics)
+                    else:
+                        print(f"⚠️  Skipping RL update due to mismatched experience lengths")
+
+                    # Log the learning episode
+                    logger.info("Interactive episode completed",
+                               query=user_query,
+                               steps=episode_steps,
+                               actions=action_chain,
+                               reward=final_episode_reward,
+                               human_feedback=human_feedback if 'human_feedback' in locals() else 0.0)
+
+                    print(f"\n✅ Episode complete! Agent learned from {episode_steps} actions. Ready for your next request...\n")
+
+                except Exception as e:
+                    logger.error("Error in conversation episode", error=str(e))
+                    print(f"Error in conversation: {e}")
+                    # Wait before retrying to prevent rapid error loops
+                    await asyncio.sleep(2.0)
 
         except KeyboardInterrupt:
             logger.info("Interactive mode interrupted by user")
@@ -255,6 +440,143 @@ class MCPRLAgentSystem:
             await self.operator_interface.disconnect()
 
         logger.info("System shutdown complete")
+
+    def _is_query_fulfilled(self, obs, episode_steps: int, user_query: str) -> bool:
+        """Determine if the user's query has been reasonably fulfilled."""
+
+        # Never stop immediately - allow at least 3 actions
+        if episode_steps < 3:
+            return False
+
+        # Basic stopping conditions
+        if obs.done:
+            return True
+
+        query_lower = user_query.lower()
+
+        # Game-related queries need proper setup sequence
+        if any(word in query_lower for word in ['play', 'game', 'start', 'run']):
+            # Check if we have a complete game setup sequence
+            if obs.state.conversation and obs.state.conversation.messages:
+                # Look for evidence of successful game setup
+                agent_messages = [msg.content.lower() for msg in obs.state.conversation.messages
+                                if msg.type.value == "agent"]
+
+                # Need evidence of game switching AND environment interaction
+                has_game_switch = any("switch" in msg or "breakout" in msg for msg in agent_messages)
+                has_env_action = any("reset" in msg or "step" in msg or "observation" in msg for msg in agent_messages)
+
+                # Only consider fulfilled if we have both game setup AND some interaction
+                if has_game_switch and has_env_action and episode_steps >= 5:
+                    print(f"🎮 Game setup sequence detected, considering query fulfilled")
+                    return True
+
+        # For non-game queries, need meaningful conversation
+        else:
+            if obs.state.conversation and obs.state.conversation.messages:
+                # Count substantive agent responses (not just acknowledgments)
+                agent_responses = [msg for msg in obs.state.conversation.messages
+                                 if msg.type.value == "agent" and len(msg.content.strip()) > 50]
+
+                # Need multiple meaningful exchanges
+                if len(agent_responses) >= 2 and episode_steps >= 4:
+                    return True
+
+        # Safety valve - don't run too long
+        if episode_steps >= 15:
+            print(f"🛑 Max episode length reached, ending query")
+            return True
+
+        return False
+
+    def _select_action_with_diversity_bias(self, state, action_chain: list, user_query: str) -> int:
+        """Select action with bias against repetitive patterns and towards query-relevant actions."""
+
+        # Get base action from agent
+        base_action = self.agent.select_action(state)
+
+        if not hasattr(state, 'available_actions') or not state.available_actions:
+            return base_action
+
+        available_tools = state.available_actions
+        if base_action >= len(available_tools):
+            return base_action
+
+        selected_tool_name = available_tools[base_action].name
+
+        # Anti-overfitting penalties
+        repetition_penalty = 0.0
+
+        # Heavy penalty for immediate repetition
+        if action_chain and action_chain[-1] == selected_tool_name:
+            repetition_penalty += 0.8
+
+        # Moderate penalty for frequent use in this chain
+        if action_chain.count(selected_tool_name) >= 2:
+            repetition_penalty += 0.5
+
+        # Specific penalty for overused tools
+        if selected_tool_name == "get_available_games":
+            if action_chain.count("get_available_games") >= 1:
+                repetition_penalty += 1.0  # Strong penalty for multiple game lists
+
+        # Query relevance bonus
+        query_bonus = 0.0
+        query_lower = user_query.lower()
+        tool_name_lower = selected_tool_name.lower()
+
+        # Direct action matching
+        if "play" in query_lower or "start" in query_lower:
+            if "switch" in tool_name_lower:
+                query_bonus += 0.5
+            elif "reset" in tool_name_lower:
+                query_bonus += 0.3
+            elif "step" in tool_name_lower:
+                query_bonus += 0.2
+
+        # Game name matching
+        if "breakout" in query_lower and "switch" in tool_name_lower:
+            query_bonus += 0.7
+
+        # Calculate bias adjustment
+        bias_adjustment = query_bonus - repetition_penalty
+
+        # If the bias is strongly negative, try to find a better action
+        if bias_adjustment < -0.5:
+            print(f"🔄 Exploring alternatives to {selected_tool_name} (bias: {bias_adjustment:.2f})")
+
+            # Find query-relevant alternatives
+            best_alternative = None
+            best_score = -999
+
+            for i, tool in enumerate(available_tools):
+                if i == base_action:
+                    continue  # Skip the originally selected action
+
+                tool_score = 0.0
+
+                # Boost direct action tools for game queries
+                if "play" in query_lower or "game" in query_lower:
+                    if "switch" in tool.name.lower():
+                        tool_score += 1.0
+                    elif "reset" in tool.name.lower() and "switch_game" in action_chain:
+                        tool_score += 0.8
+                    elif "step" in tool.name.lower() and any(x in action_chain for x in ["reset_environment", "switch_game"]):
+                        tool_score += 0.6
+
+                # Penalize already used tools
+                tool_score -= action_chain.count(tool.name) * 0.3
+
+                if tool_score > best_score:
+                    best_score = tool_score
+                    best_alternative = i
+
+            # Use alternative if it's significantly better
+            if best_alternative is not None and best_score > 0.3:
+                print(f"🎯 Switching to {available_tools[best_alternative].name} (score: {best_score:.2f})")
+                return best_alternative
+
+        return base_action
 
 
 def setup_signal_handlers(system: MCPRLAgentSystem):

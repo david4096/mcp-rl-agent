@@ -273,47 +273,158 @@ class MessageParser:
         return mentions
 
     def extract_parameters(self, message: str, tool: MCPTool) -> Dict[str, Any]:
-        """Extract parameters for a specific tool from the message."""
+        """Extract parameters for a specific tool from the message using intelligent parsing."""
         parameters = {}
 
         if not tool.parameters or "properties" not in tool.parameters:
             return parameters
 
-        # Simple parameter extraction based on common patterns
         properties = tool.parameters["properties"]
+        required_params = tool.parameters.get("required", [])
+        message_lower = message.lower()
 
+        # Enhanced parameter extraction with semantic understanding
         for param_name, param_info in properties.items():
             param_type = param_info.get("type", "string")
+            description = param_info.get("description", "")
 
-            # Look for parameter values in various formats
-            patterns = [
-                rf'{param_name}[:\s]+([^,\s]+)',  # "param: value"
-                rf'{param_name}[=\s]+([^,\s]+)',  # "param = value"
-                rf'--{param_name}[=\s]+([^,\s]+)'  # "--param=value"
-            ]
+            # Try explicit parameter patterns first
+            explicit_value = self._extract_explicit_parameter(message, param_name, param_type)
+            if explicit_value is not None:
+                parameters[param_name] = explicit_value
+                continue
 
-            for pattern in patterns:
-                match = re.search(pattern, message, re.IGNORECASE)
-                if match:
-                    value_str = match.group(1).strip('"\'')
-
-                    # Convert to appropriate type
-                    try:
-                        if param_type == "integer":
-                            parameters[param_name] = int(value_str)
-                        elif param_type == "number":
-                            parameters[param_name] = float(value_str)
-                        elif param_type == "boolean":
-                            parameters[param_name] = value_str.lower() in ["true", "yes", "1"]
-                        else:
-                            parameters[param_name] = value_str
-                        break
-                    except ValueError:
-                        # If conversion fails, keep as string
-                        parameters[param_name] = value_str
-                        break
+            # Try semantic extraction based on parameter name and description
+            semantic_value = self._extract_semantic_parameter(
+                message, message_lower, param_name, param_info, tool.name
+            )
+            if semantic_value is not None:
+                parameters[param_name] = semantic_value
 
         return parameters
+
+    def _extract_explicit_parameter(self, message: str, param_name: str, param_type: str) -> Any:
+        """Extract explicitly mentioned parameters."""
+        patterns = [
+            rf'{param_name}[:\s]+([^,\s]+)',  # "param: value"
+            rf'{param_name}[=\s]+([^,\s]+)',  # "param = value"
+            rf'--{param_name}[=\s]+([^,\s]+)',  # "--param=value"
+            rf'{param_name}\s+([^,\s]+)'  # "param value"
+        ]
+
+        for pattern in patterns:
+            match = re.search(pattern, message, re.IGNORECASE)
+            if match:
+                value_str = match.group(1).strip('"\'')
+                return self._convert_parameter_type(value_str, param_type)
+
+        return None
+
+    def _extract_semantic_parameter(self, message: str, message_lower: str, param_name: str, param_info: Dict, tool_name: str) -> Any:
+        """Extract parameters using semantic understanding of the message."""
+        param_type = param_info.get("type", "string")
+        description = param_info.get("description", "").lower()
+
+        # Game-specific parameter extraction
+        if tool_name == "switch_game" and param_name == "game_name":
+            # Look for game names after common trigger words
+            game_patterns = [
+                r'play\s+(?:game\s+)?(\w+)',
+                r'switch\s+to\s+(\w+)',
+                r'start\s+(\w+)',
+                r'load\s+(\w+)',
+                r'game\s+(\w+)',
+                r'(\w+)\s+game'
+            ]
+
+            for pattern in game_patterns:
+                match = re.search(pattern, message_lower)
+                if match:
+                    game_name = match.group(1).strip()
+                    # Filter out common non-game words
+                    if game_name not in ['the', 'a', 'an', 'this', 'that', 'new', 'old']:
+                        return game_name
+
+        # File/path parameter extraction
+        elif "file" in param_name.lower() or "path" in param_name.lower():
+            # Look for file paths or names
+            file_patterns = [
+                r'file\s+([^\s,]+)',
+                r'path\s+([^\s,]+)',
+                r'([^\s,]+\.[\w]+)',  # filename.ext
+                r'/([^\s,]+)',  # /path/to/file
+            ]
+
+            for pattern in file_patterns:
+                match = re.search(pattern, message)
+                if match:
+                    return match.group(1).strip('"\'')
+
+        # Number parameter extraction
+        elif param_type in ["integer", "number"]:
+            numbers = re.findall(r'\b\d+(?:\.\d+)?\b', message)
+            if numbers:
+                try:
+                    if param_type == "integer":
+                        return int(float(numbers[0]))
+                    else:
+                        return float(numbers[0])
+                except ValueError:
+                    pass
+
+        # Boolean parameter extraction
+        elif param_type == "boolean":
+            if any(word in message_lower for word in ['true', 'yes', 'on', 'enable', 'start']):
+                return True
+            elif any(word in message_lower for word in ['false', 'no', 'off', 'disable', 'stop']):
+                return False
+
+        # Action parameter extraction for game actions
+        elif param_name == "action" and tool_name == "step_environment":
+            # Map common action words to numbers/actions
+            action_mappings = {
+                'up': 2, 'down': 5, 'left': 4, 'right': 3,
+                'fire': 1, 'shoot': 1, 'space': 1,
+                'nothing': 0, 'noop': 0, 'wait': 0
+            }
+
+            for word, action_id in action_mappings.items():
+                if word in message_lower:
+                    return action_id
+
+        # String parameter - try to extract meaningful content
+        elif param_type == "string":
+            # Remove common words and extract the meaningful part
+            words = message.split()
+            # Filter out very common words but keep meaningful ones
+            meaningful_words = [w for w in words if len(w) > 2 and
+                             w.lower() not in ['the', 'and', 'for', 'are', 'can', 'you', 'please']]
+
+            if meaningful_words:
+                # Return the most likely meaningful word(s)
+                if len(meaningful_words) == 1:
+                    return meaningful_words[0]
+                # If multiple words, try to find the most relevant one
+                for word in meaningful_words:
+                    if param_name.lower() in word.lower() or word.lower() in param_name.lower():
+                        return word
+
+        return None
+
+    def _convert_parameter_type(self, value_str: str, param_type: str) -> Any:
+        """Convert string value to appropriate parameter type."""
+        try:
+            if param_type == "integer":
+                return int(value_str)
+            elif param_type == "number":
+                return float(value_str)
+            elif param_type == "boolean":
+                return value_str.lower() in ["true", "yes", "1", "on", "enable"]
+            else:
+                return value_str
+        except ValueError:
+            # If conversion fails, return as string
+            return value_str
 
 
 class ResponseGenerator:

@@ -1,0 +1,102 @@
+# Configuration for MCP RL Agent with Atari Pong environment
+agent_id: "mcp-rl-pong"
+version: "1.0"
+
+# MCP Server configurations
+mcp_servers:
+  - id: "atari_pong"
+    name: "Atari Pong Environment"
+    description: "MCP server hosting Atari Pong learning environment"
+    command: "python"
+    args: ["-m", "mcp_atari_server", "--game", "pong"]
+    env:
+      ATARI_GAME: "pong"
+      RENDER_MODE: "rgb_array"
+
+# LLM Provider configuration
+llm_provider:
+  type: "mock"
+  config:
+    model: "mock-embedder"
+
+# Enhanced PPO configuration
+rl:
+  type: "enhanced_ppo"
+  learning_rate: 0.0003
+  gamma: 0.99
+  clip_range: 0.2
+  batch_size: 64
+  n_epochs: 10
+  value_coef: 0.5
+  entropy_coef: 0.01
+  max_grad_norm: 0.5
+
+  # Enhanced architecture parameters
+  query_embedding_dim: 256
+  action_embedding_dim: 128
+  max_action_history: 10
+  hidden_size: 256
+  n_layers: 2
+  attention_heads: 4
+
+# Environment configuration
+environment:
+  max_episode_length: 2000
+  reward_scale: 1.0
+  context_window: 10
+  embedding_dim: 1536
+  max_action_history: 10
+
+  # Standard reward parameters
+  success_reward: 1.0
+  failure_penalty: -0.1
+  step_penalty: -0.0005  # Smaller step penalty for longer episodes
+  repetition_penalty: -0.1
+
+  # Atari-specific reward configuration
+  atari_rewards:
+    # Universal reward settings
+    universal:
+      score_reward_scale: 1.0          # Higher reward scale for Pong scoring
+      life_penalty: -0.5               # Smaller life penalty (games are longer)
+      level_completion_bonus: 0.0      # No levels in Pong
+      efficiency_bonus_scale: 0.3
+      exploration_bonus: 0.05
+
+    # Pong-specific rewards
+    game_specific:
+      pong:
+        point_scored_reward: 5.0       # Big reward for scoring a point
+        point_conceded_penalty: -3.0   # Penalty for opponent scoring
+        paddle_hit_bonus: 0.1          # Bonus for successful paddle contact
+        ball_return_bonus: 0.2         # Bonus for returning the ball
+        rally_length_bonus: 0.01       # Bonus per rally length
+
+    # Adaptive learning parameters
+    adaptive:
+      enabled: true
+      learning_rate: 0.001
+      adaptation_window: 100
+      min_episodes: 50
+
+# Operator interface
+operator:
+  type: "mock"
+  feedback_probability: 0.1
+
+# Training configuration
+training:
+  total_episodes: 3000
+  save_interval: 100
+  eval_interval: 50
+  checkpoint_dir: "./checkpoints/pong"
+  log_level: "INFO"
+
+# Logging configuration
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  handlers:
+    - type: "file"
+      filename: "logs/mcp_rl_pong.log"
+    - type: "console"

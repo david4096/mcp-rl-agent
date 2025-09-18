@@ -101,9 +101,11 @@ class MockLLMProvider(BaseLLMProvider):
     ) -> str:
         """Generate a mock response."""
         logger.debug("Generating mock response", message_count=len(messages))
+        print(f"🔮 MockLLM generating response (model: {self.model_name}, messages: {len(messages)})")
 
         # Simulate processing delay
         if self.delay > 0:
+            print(f"⏳ Simulating {self.delay}s processing delay...")
             await asyncio.sleep(self.delay)
 
         # Cycle through predefined responses
@@ -115,6 +117,7 @@ class MockLLMProvider(BaseLLMProvider):
         self._increment_usage(estimated_tokens)
 
         logger.debug("Mock response generated", response_length=len(response))
+        print(f"✅ MockLLM response: '{response[:100]}{'...' if len(response) > 100 else ''}'")
         return response
 
 
@@ -152,21 +155,30 @@ class LLMProviderFactory:
     def create_provider(config: Dict[str, Any]) -> LLMProviderInterface:
         """Create an LLM provider based on configuration."""
         provider_type = config.get("provider", "mock").lower()
+        model_name = config.get("model_name", "mock_model")
+
+        logger.info("Creating LLM provider", provider_type=provider_type, model_name=model_name)
 
         if provider_type == "mock":
-            return MockLLMProvider(
-                model_name=config.get("model_name", "mock_model"),
+            provider = MockLLMProvider(
+                model_name=model_name,
                 max_tokens=config.get("max_tokens", 1024),
                 temperature=config.get("temperature", 0.7),
                 responses=config.get("responses"),
                 delay=config.get("delay", 0.1)
             )
+            logger.info("Mock LLM provider created successfully", model_name=model_name)
+            return provider
         elif provider_type == "huggingface":
             from .huggingface import HuggingFaceLLMProvider
-            return HuggingFaceLLMProvider(config)
+            provider = HuggingFaceLLMProvider(config)
+            logger.info("HuggingFace LLM provider created successfully", model_name=model_name)
+            return provider
         elif provider_type == "claude":
             from .claude import ClaudeLLMProvider
-            return ClaudeLLMProvider(config)
+            provider = ClaudeLLMProvider(config)
+            logger.info("Claude LLM provider created successfully", model_name=model_name)
+            return provider
         else:
             raise ValueError(f"Unknown LLM provider type: {provider_type}")
 

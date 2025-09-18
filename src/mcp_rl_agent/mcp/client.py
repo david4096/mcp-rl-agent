@@ -12,6 +12,7 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 
 from ..interfaces import MCPClientInterface, MCPTool, MCPAction, MCPResult
 from ..config.models import MCPServerConfig, MCPTransport
+from .http_client import HTTPMCPClient
 
 logger = structlog.get_logger(__name__)
 
@@ -323,6 +324,8 @@ class MCPClientManager:
             client = StdioMCPClient(config)
         elif config.transport == MCPTransport.WEBSOCKET:
             client = WebSocketMCPClient(config)
+        elif config.transport == MCPTransport.HTTP:
+            client = HTTPMCPClient(config)
         else:
             raise ValueError(f"Unsupported transport: {config.transport}")
 

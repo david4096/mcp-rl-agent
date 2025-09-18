@@ -21,27 +21,36 @@ class ConsoleOperatorInterface(OperatorInterface):
 
     async def send_message(self, message: str) -> None:
         """Send a message to the operator (print to console)."""
-        print(f"Agent: {message}")
+        print(f"🤖 Agent → Human: {message}")
+        logger.debug("Console operator sent message", message_length=len(message))
 
     async def receive_message(self) -> Optional[str]:
         """Receive a message from the operator (read from console)."""
         try:
+            print(f"👤 Waiting for human input (timeout: {self.timeout}s)...")
             # Run input in executor to avoid blocking
             loop = asyncio.get_event_loop()
             message = await asyncio.wait_for(
                 loop.run_in_executor(None, input, self.prompt),
                 timeout=self.timeout
             )
-            return message.strip() if message else None
+            received_msg = message.strip() if message else None
+            if received_msg:
+                print(f"👤 Human → Agent: {received_msg}")
+                logger.debug("Console operator received message", message_length=len(received_msg))
+            return received_msg
 
         except asyncio.TimeoutError:
             logger.warning("Console input timeout", timeout=self.timeout)
+            print(f"⏰ Console input timeout after {self.timeout}s")
             return None
         except EOFError:
             logger.info("Console input EOF received")
+            print("📝 Console input ended (EOF)")
             return None
         except Exception as e:
             logger.error("Error reading console input", error=str(e))
+            print(f"❌ Error reading console input: {e}")
             return None
 
     async def get_feedback(self, action: MCPAction, result: MCPResult) -> float:
@@ -90,18 +99,23 @@ class MockOperatorInterface(OperatorInterface):
 
     async def send_message(self, message: str) -> None:
         """Mock send message (log it)."""
+        print(f"🔄 MockOperator → Human: {message[:100]}{'...' if len(message) > 100 else ''}")
         logger.debug("Mock operator received message", message=message[:100])
 
     async def receive_message(self) -> Optional[str]:
         """Return next mock response."""
         if self.delay > 0:
+            print(f"⏳ MockOperator simulating {self.delay}s delay...")
             await asyncio.sleep(self.delay)
 
         if self.response_index < len(self.responses):
             response = self.responses[self.response_index]
             self.response_index += 1
+            print(f"🔄 MockOperator → Agent: {response}")
             logger.debug("Mock operator sending response", response=response)
             return response
+
+        print("🔄 MockOperator: No more responses available")
         return None
 
     async def get_feedback(self, action: MCPAction, result: MCPResult) -> float:

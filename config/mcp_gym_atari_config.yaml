@@ -1,0 +1,184 @@
+# Configuration for MCP RL Agent with MCP Gym Atari Learning Environment
+agent_id: "mcp-rl-gym-atari"
+version: "1.0"
+
+# MCP Server configurations - HTTP transport to your running server
+mcp_servers:
+  - id: "mcp_gym_atari"
+    name: "MCP Gym - Atari Learning Environment"
+    transport: "http"
+    url: "http://0.0.0.0:8001/mcp"
+
+    # HTTP-specific settings
+    timeout: 60                 # Longer timeout for game environments
+    retry_attempts: 3
+    retry_delay: 2.0
+
+    # Health check settings
+    health_check:
+      enabled: true
+      endpoint: "/health"       # Adjust if your server has a different health endpoint
+      interval: 30              # Check every 30 seconds
+      timeout: 10
+
+    # Request headers (if needed for authentication)
+    headers:
+      User-Agent: "MCP-RL-Agent/1.0"
+      Accept: "application/json"
+      # Authorization: "Bearer ${MCP_API_TOKEN}"  # Uncomment if auth required
+
+# LLM configuration
+llm:
+  provider: "mock"  # Use mock for training, or switch to "claude" for real interaction
+  model_name: "mock-embedder"
+
+# Enhanced PPO configuration optimized for Atari environments
+rl:
+  type: "enhanced_ppo"
+  learning_rate: 0.0003
+  gamma: 0.99
+  clip_range: 0.2
+  batch_size: 128             # Larger batch for stable learning
+  n_epochs: 8
+  value_coef: 0.5
+  entropy_coef: 0.02          # Higher entropy for exploration
+  max_grad_norm: 0.5
+
+  # Enhanced architecture parameters
+  query_embedding_dim: 256
+  action_embedding_dim: 128
+  max_action_history: 12      # Track longer action sequences
+  hidden_size: 512            # Larger network for complex games
+  n_layers: 3
+  attention_heads: 8
+
+# Environment configuration
+environment:
+  max_episode_length: 2000    # Adjust based on game length
+  reward_scale: 1.0
+  context_window: 15
+  embedding_dim: 1792         # 256 + (12 * 128)
+  max_action_history: 12
+
+  # Standard reward parameters
+  success_reward: 1.0
+  failure_penalty: -0.1
+  step_penalty: -0.0005       # Small penalty to encourage efficiency
+  repetition_penalty: -0.2
+
+  # Atari-specific reward configuration
+  atari_rewards:
+    # Universal reward settings for all Atari games
+    universal:
+      score_reward_scale: 0.01         # Reward per point scored
+      life_penalty: -2.0               # Penalty for losing a life
+      level_completion_bonus: 20.0     # Bonus for completing levels
+      efficiency_bonus_scale: 0.8      # Bonus for efficient play
+      exploration_bonus: 0.15          # Encourage exploration
+
+    # Game-specific rewards (will be applied automatically based on detected game)
+    game_specific:
+      # Breakout
+      breakout:
+        brick_destroyed_reward: 0.1
+        paddle_hit_bonus: 0.05
+        ball_lost_penalty: -3.0
+        wall_clear_bonus: 25.0
+
+      # Pong
+      pong:
+        point_scored_reward: 5.0
+        point_conceded_penalty: -3.0
+        paddle_hit_bonus: 0.1
+        rally_length_bonus: 0.02
+
+      # Pac-Man
+      pacman:
+        dot_eaten_reward: 0.1
+        power_pellet_bonus: 2.0
+        ghost_eaten_reward: 5.0
+        fruit_bonus: 10.0
+        ghost_avoidance_bonus: 0.1
+
+      # Space Invaders
+      space_invaders:
+        invader_shot_reward: 0.2
+        ufo_bonus: 5.0
+        wave_clear_bonus: 15.0
+        accurate_shot_bonus: 0.1
+
+      # Asteroids
+      asteroids:
+        asteroid_destroyed_reward: 0.3
+        large_asteroid_bonus: 0.5
+        saucer_bonus: 3.0
+        survival_bonus: 0.01
+
+    # Adaptive learning parameters
+    adaptive:
+      enabled: true
+      learning_rate: 0.001
+      adaptation_window: 150    # Episodes to consider for adaptation
+      min_episodes: 75          # Minimum episodes before adaptation starts
+
+# Operator interface (for human feedback during training)
+operator:
+  type: "mock"  # Use "console" for human interaction
+
+# Training configuration
+training:
+  total_episodes: 5000
+  save_interval: 100          # Save checkpoint every 100 episodes
+  eval_interval: 50           # Evaluate every 50 episodes
+  checkpoint_dir: "./checkpoints/mcp_gym_atari"
+  log_level: "INFO"
+
+  # Early stopping to prevent overtraining
+  early_stopping:
+    enabled: true
+    patience: 300             # Stop if no improvement for 300 episodes
+    min_delta: 0.01           # Minimum improvement threshold
+
+  # Learning rate scheduling
+  lr_schedule:
+    type: "cosine_annealing"
+    initial_lr: 0.0003
+    min_lr: 0.00005
+    warmup_episodes: 100
+
+# Evaluation configuration
+evaluation:
+  eval_episodes_per_run: 10
+  eval_deterministic: true    # Use deterministic policy for evaluation
+  render_evaluation: false    # Set to true to see game rendering during eval
+  save_evaluation_videos: false  # Set to true to save videos of best runs
+
+# Logging configuration
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  handlers:
+    - type: "file"
+      filename: "logs/mcp_gym_atari.log"
+      max_size: "50MB"
+      backup_count: 3
+    - type: "console"
+
+  # Specialized logging for debugging
+  debug_settings:
+    log_mcp_requests: false     # Set to true to log all MCP requests/responses
+    log_reward_calculations: false  # Set to true to see detailed reward breakdown
+    log_action_selection: false    # Set to true to see action selection process
+    log_attention_weights: false   # Set to true to see attention patterns
+
+# Connection management
+connection:
+  max_retries: 5
+  backoff_factor: 1.5         # Exponential backoff: 1.5, 2.25, 3.375, etc.
+  max_backoff: 30.0           # Maximum wait time between retries
+
+  # Connection pooling (if supported by the MCP server)
+  pool_settings:
+    max_connections: 10
+    max_keepalive_connections: 5
+    keepalive_expiry: 300

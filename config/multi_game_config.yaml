@@ -1,0 +1,161 @@
+# Configuration for MCP RL Agent with multiple Atari games
+# This configuration demonstrates how to set up multiple game environments
+agent_id: "mcp-rl-multi-atari"
+version: "1.0"
+
+# Multiple MCP Server configurations
+mcp_servers:
+  - id: "atari_breakout"
+    name: "Atari Breakout Environment"
+    description: "MCP server hosting Atari Breakout learning environment"
+    command: "python"
+    args: ["-m", "mcp_atari_server", "--game", "breakout"]
+    env:
+      ATARI_GAME: "breakout"
+      RENDER_MODE: "rgb_array"
+    weight: 1.0  # Equal weight in multi-game training
+
+  - id: "atari_pong"
+    name: "Atari Pong Environment"
+    description: "MCP server hosting Atari Pong learning environment"
+    command: "python"
+    args: ["-m", "mcp_atari_server", "--game", "pong"]
+    env:
+      ATARI_GAME: "pong"
+      RENDER_MODE: "rgb_array"
+    weight: 1.0
+
+  - id: "atari_space_invaders"
+    name: "Atari Space Invaders Environment"
+    description: "MCP server hosting Atari Space Invaders learning environment"
+    command: "python"
+    args: ["-m", "mcp_atari_server", "--game", "space_invaders"]
+    env:
+      ATARI_GAME: "space_invaders"
+      RENDER_MODE: "rgb_array"
+    weight: 1.0
+
+# LLM Provider configuration
+llm_provider:
+  type: "mock"
+  config:
+    model: "mock-embedder"
+
+# Enhanced PPO configuration optimized for multi-game learning
+rl:
+  type: "enhanced_ppo"
+  learning_rate: 0.0002   # Lower LR for stable multi-game learning
+  gamma: 0.99
+  clip_range: 0.2
+  batch_size: 128
+  n_epochs: 8             # Fewer epochs to prevent overfitting to one game
+  value_coef: 0.5
+  entropy_coef: 0.03      # Higher entropy for diverse game strategies
+  max_grad_norm: 0.5
+
+  # Enhanced architecture parameters
+  query_embedding_dim: 256
+  action_embedding_dim: 128
+  max_action_history: 12
+  hidden_size: 512        # Larger network for game diversity
+  n_layers: 3
+  attention_heads: 8
+
+# Environment configuration
+environment:
+  max_episode_length: 2000  # Balanced for different game lengths
+  reward_scale: 1.0
+  context_window: 12
+  embedding_dim: 1792       # 256 + (12 * 128)
+  max_action_history: 12
+
+  # Game selection strategy
+  game_selection_strategy: "round_robin"  # or "random", "weighted"
+  game_switch_frequency: 100  # Switch game every N episodes
+
+  # Standard reward parameters
+  success_reward: 1.0
+  failure_penalty: -0.1
+  step_penalty: -0.0005
+  repetition_penalty: -0.15
+
+  # Universal Atari reward configuration
+  atari_rewards:
+    # Universal settings work across all games
+    universal:
+      score_reward_scale: 0.005        # Balanced across different scoring scales
+      life_penalty: -2.0
+      level_completion_bonus: 15.0
+      efficiency_bonus_scale: 0.8
+      exploration_bonus: 0.15
+
+    # Game-specific rewards for all supported games
+    game_specific:
+      breakout:
+        brick_destroyed_reward: 0.1
+        paddle_hit_bonus: 0.05
+        ball_lost_penalty: -2.0
+        wall_clear_bonus: 20.0
+
+      pong:
+        point_scored_reward: 5.0
+        point_conceded_penalty: -3.0
+        paddle_hit_bonus: 0.1
+        rally_length_bonus: 0.01
+
+      space_invaders:
+        invader_shot_reward: 0.2
+        ufo_bonus: 5.0
+        wave_clear_bonus: 15.0
+        accurate_shot_bonus: 0.1
+
+    # Adaptive learning parameters
+    adaptive:
+      enabled: true
+      learning_rate: 0.001
+      adaptation_window: 200     # Longer window for multi-game adaptation
+      min_episodes: 100
+      game_specific_adaptation: true  # Adapt separately for each game
+
+# Operator interface
+operator:
+  type: "mock"
+  feedback_probability: 0.1
+
+# Training configuration
+training:
+  total_episodes: 15000     # More episodes for multi-game mastery
+  save_interval: 500
+  eval_interval: 200
+  checkpoint_dir: "./checkpoints/multi_atari"
+  log_level: "INFO"
+
+  # Multi-game specific training settings
+  game_rotation_schedule:
+    - game: "breakout"
+      episodes: 100
+    - game: "pong"
+      episodes: 100
+    - game: "space_invaders"
+      episodes: 100
+    # Repeat cycle
+
+# Evaluation configuration
+evaluation:
+  games_to_evaluate: ["breakout", "pong", "space_invaders"]
+  eval_episodes_per_game: 10
+  eval_frequency: 500  # Every 500 training episodes
+
+# Logging configuration
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  handlers:
+    - type: "file"
+      filename: "logs/mcp_rl_multi_atari.log"
+    - type: "console"
+
+  # Game-specific logging
+  game_specific_logs: true
+  log_game_switches: true
+  log_adaptation_changes: true
